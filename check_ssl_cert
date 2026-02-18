@@ -365,6 +365,8 @@ usage() {
     echo "      --fingerprint-alg algorithm  Algorithm for fingerprint. Default sha1"
     echo "      --first-element-only         Verify just the first cert element, not"
     echo "                                   the whole chain"
+    echo "      --last-element-only          Verify just the last cert element of the"
+    echo "                                   chain (e.g., issuing CA)"
     echo "      --force-dconv-date           Force the usage of dconv for date"
     echo "                                   computations"
     echo "      --force-perl-date            Force the usage of Perl for date"
@@ -3365,9 +3367,20 @@ parse_command_line_options() {
             usage
             ;;
         --first-element-only)
+            if [ -n "${LAST_ELEMENT_ONLY}" ]; then
+                unknown "Options '--first-element-only' and '--last-element-only' cannot be specified at the same time"
+            fi
             FIRST_ELEMENT_ONLY=1
             shift
             ;;
+        --last-element-only)
+            if [ -n "${FIRST_ELEMENT_ONLY}" ]; then
+                unknown "Options '--first-element-only' and '--last-element-only' cannot be specified at the same time"
+            fi
+            LAST_ELEMENT_ONLY=1
+            shift
+            ;;
+
         --force-dconv-date)
             FORCE_DCONV_DATE=1
             shift
@@ -4408,6 +4421,7 @@ main() {
     # https://support.apple.com/en-us/HT211025
     NOT_VALID_LONGER_THAN=""
     FIRST_ELEMENT_ONLY=""
+    LAST_ELEMENT_ONLY=""
 
     # Set the default temp dir if not set
     if [ -z "${TMPDIR}" ]; then
@@ -6770,21 +6784,13 @@ EOF
             CN_EXPIRED_CRITICAL=''
             CN_EXPIRED_WARNING=''
 
-            CERT_IN_CHAIN=1
-            while [ "${CERT_IN_CHAIN}" -le "${NUM_CERTIFICATES}" ]; do
+            if [ -n "${LAST_ELEMENT_ONLY}" ]; then
 
-                debuglog '------------------------------------------------------------------------------'
-                debuglog "-- Checking element ${CERT_IN_CHAIN}"
+                debuglog "Only last element of the chain"
 
-                if echo "${SKIP_ELEMENT}" | "${GREP_BIN}" -q "${CERT_IN_CHAIN}"; then
-                    debuglog "    skipping element ${CERT_IN_CHAIN}"
-                    CERT_IN_CHAIN=$((CERT_IN_CHAIN + 1))
-                    continue
-                fi
-
-                elem_number=$((CERT_IN_CHAIN))
+                elem_number=$((NUM_CERTIFICATES))
                 chain_element=$(sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' "${CERT}" |
-                    awk -v n="${CERT_IN_CHAIN}" '/-BEGIN CERTIFICATE-/{l++} (l==n) {print}')
+                    awk -v n="${elem_number}" '/-BEGIN CERTIFICATE-/{l++} (l==n) {print}')
 
                 check_cert_end_date "${chain_element}" "${elem_number}"
 
@@ -6796,12 +6802,41 @@ EOF
                 debuglog '------------------------------------------------------------------------------'
                 check_ocsp "${chain_element}" "${elem_number}"
 
-                CERT_IN_CHAIN=$((CERT_IN_CHAIN + 1))
-                if [ "${ELEMENT}" -ne 0 ] && [ $((ELEMENT - CERT_IN_CHAIN)) -lt 0 ]; then
-                    break
-                fi
+            else
 
-            done
+                CERT_IN_CHAIN=1
+                while [ "${CERT_IN_CHAIN}" -le "${NUM_CERTIFICATES}" ]; do
+
+                    debuglog '------------------------------------------------------------------------------'
+                    debuglog "-- Checking element ${CERT_IN_CHAIN}"
+
+                    if echo "${SKIP_ELEMENT}" | "${GREP_BIN}" -q "${CERT_IN_CHAIN}"; then
+                        debuglog "    skipping element ${CERT_IN_CHAIN}"
+                        CERT_IN_CHAIN=$((CERT_IN_CHAIN + 1))
+                        continue
+                    fi
+
+                    elem_number=$((CERT_IN_CHAIN))
+                    chain_element=$(sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' "${CERT}" |
+                        awk -v n="${CERT_IN_CHAIN}" '/-BEGIN CERTIFICATE-/{l++} (l==n) {print}')
+
+                    check_cert_end_date "${chain_element}" "${elem_number}"
+
+                    if [ -n "${CRL}" ]; then
+                        debuglog '------------------------------------------------------------------------------'
+                        check_crl "${chain_element}" "${elem_number}"
+                    fi
+
+                    debuglog '------------------------------------------------------------------------------'
+                    check_ocsp "${chain_element}" "${elem_number}"
+
+                    CERT_IN_CHAIN=$((CERT_IN_CHAIN + 1))
+                    if [ "${ELEMENT}" -ne 0 ] && [ $((ELEMENT - CERT_IN_CHAIN)) -lt 0 ]; then
+                        break
+                    fi
+
+                done
+            fi
 
             debuglog '------------------------------------------------------------------------------'
 

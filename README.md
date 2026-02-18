@@ -93,6 +93,8 @@ Options:
       --fingerprint-alg algorithm  Algorithm for fingerprint. Default sha1
       --first-element-only         Verify just the first cert element, not
                                    the whole chain
+      --last-element-only          Verify just the last cert element of the
+                                   chain (e.g., issuing CA)
       --force-dconv-date           Force the usage of dconv for date
                                    computations
       --force-perl-date            Force the usage of Perl for date
